@@ -14,7 +14,86 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      file_chunks: {
+        Row: {
+          chunk_number: number
+          chunk_size: number
+          created_at: string
+          file_id: string
+          id: string
+          storage_path: string
+          upload_status: string
+        }
+        Insert: {
+          chunk_number: number
+          chunk_size: number
+          created_at?: string
+          file_id: string
+          id?: string
+          storage_path: string
+          upload_status?: string
+        }
+        Update: {
+          chunk_number?: number
+          chunk_size?: number
+          created_at?: string
+          file_id?: string
+          id?: string
+          storage_path?: string
+          upload_status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "file_chunks_file_id_fkey"
+            columns: ["file_id"]
+            isOneToOne: false
+            referencedRelation: "shared_files"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      shared_files: {
+        Row: {
+          chunk_size: number
+          created_at: string
+          expires_at: string
+          file_size: number
+          filename: string
+          id: string
+          mime_type: string | null
+          sender_id: string | null
+          share_token: string
+          total_chunks: number
+          upload_status: string
+        }
+        Insert: {
+          chunk_size?: number
+          created_at?: string
+          expires_at?: string
+          file_size: number
+          filename: string
+          id?: string
+          mime_type?: string | null
+          sender_id?: string | null
+          share_token?: string
+          total_chunks: number
+          upload_status?: string
+        }
+        Update: {
+          chunk_size?: number
+          created_at?: string
+          expires_at?: string
+          file_size?: number
+          filename?: string
+          id?: string
+          mime_type?: string | null
+          sender_id?: string | null
+          share_token?: string
+          total_chunks?: number
+          upload_status?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
