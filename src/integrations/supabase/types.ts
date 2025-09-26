@@ -99,7 +99,20 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_shared_file_info: {
+        Args: { token: string }
+        Returns: {
+          chunk_size: number
+          created_at: string
+          expires_at: string
+          file_size: number
+          filename: string
+          id: string
+          mime_type: string
+          total_chunks: number
+          upload_status: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

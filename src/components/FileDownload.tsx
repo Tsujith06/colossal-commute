@@ -39,17 +39,19 @@ export const FileDownload = ({ shareToken }: FileDownloadProps) => {
   const fetchFileInfo = async () => {
     try {
       const { data, error } = await supabase
-        .from('shared_files')
-        .select('*')
-        .eq('share_token', shareToken)
-        .single();
+        .rpc('get_shared_file_info', { token: shareToken });
 
       if (error) throw error;
 
-      setFileInfo(data);
+      // The function returns an array, get the first (and only) result
+      if (data && data.length > 0) {
+        setFileInfo(data[0]);
+      } else {
+        throw new Error('File not found or expired');
+      }
     } catch (error) {
       console.error('Error fetching file info:', error);
-      toast.error('File not found or invalid share link');
+      toast.error('File not found, expired, or invalid share link');
     } finally {
       setLoading(false);
     }
