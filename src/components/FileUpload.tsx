@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Upload, File, Share2, CheckCircle, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 
-const CHUNK_SIZE = 5 * 1024 * 1024 * 1024; // 5GB in bytes
+const CHUNK_SIZE = 50 * 1024 * 1024; // 50MB in bytes for better reliability
 
 interface UploadProgress {
   fileName: string;
@@ -15,6 +15,8 @@ interface UploadProgress {
   percentage: number;
   status: 'uploading' | 'completed' | 'failed';
   shareToken?: string;
+  currentProcess: string;
+  error?: string;
 }
 
 export const FileUpload = () => {
@@ -45,12 +47,23 @@ export const FileUpload = () => {
       totalChunks,
       completedChunks: 0,
       percentage: 0,
-      status: 'uploading'
+      status: 'uploading',
+      currentProcess: `Preparing to upload ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`
     };
     
     setUploads(prev => [...prev, initialProgress]);
 
+    const updateProgress = (updates: Partial<UploadProgress>) => {
+      setUploads(prev => prev.map(upload => 
+        upload.fileName === file.name 
+          ? { ...upload, ...updates }
+          : upload
+      ));
+    };
+
     try {
+      updateProgress({ currentProcess: `Creating file record for ${file.name}...` });
+      
       // Create shared file record
       const { data: sharedFile, error: fileError } = await supabase
         .from('shared_files')
@@ -63,67 +76,116 @@ export const FileUpload = () => {
         .select()
         .single();
 
-      if (fileError) throw fileError;
+      if (fileError) {
+        console.error('File record creation error:', fileError);
+        throw new Error(`Failed to create file record: ${fileError.message}`);
+      }
 
-      // Upload chunks
+      // Upload chunks with retry logic and detailed progress
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
         const chunkPath = `${sharedFile.id}/chunk_${i}`;
+        const chunkSizeMB = (chunk.size / (1024 * 1024)).toFixed(2);
         
-        // Upload chunk to storage
-        const { error: uploadError } = await supabase.storage
-          .from('file-chunks')
-          .upload(chunkPath, chunk);
+        updateProgress({ 
+          currentProcess: `Uploading chunk ${i + 1}/${totalChunks} (${chunkSizeMB} MB)...` 
+        });
 
-        if (uploadError) throw uploadError;
+        let retries = 3;
+        let uploadSuccess = false;
 
-        // Record chunk in database
-        const { error: chunkError } = await supabase
-          .from('file_chunks')
-          .insert({
-            file_id: sharedFile.id,
-            chunk_number: i,
-            chunk_size: chunk.size,
-            storage_path: chunkPath,
-            upload_status: 'completed'
-          });
+        while (!uploadSuccess && retries > 0) {
+          try {
+            // Upload chunk to storage with timeout
+            const uploadPromise = supabase.storage
+              .from('file-chunks')
+              .upload(chunkPath, chunk);
 
-        if (chunkError) throw chunkError;
+            const timeoutPromise = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Upload timeout')), 60000) // 60 second timeout
+            );
 
-        // Update progress
-        const completedChunks = i + 1;
-        const percentage = Math.round((completedChunks / totalChunks) * 100);
-        
-        setUploads(prev => prev.map(upload => 
-          upload.fileName === file.name 
-            ? { ...upload, completedChunks, percentage }
-            : upload
-        ));
+            const { error: uploadError } = await Promise.race([uploadPromise, timeoutPromise]) as any;
+
+            if (uploadError) {
+              throw new Error(`Storage upload failed: ${uploadError.message}`);
+            }
+
+            // Record chunk in database
+            const { error: chunkError } = await supabase
+              .from('file_chunks')
+              .insert({
+                file_id: sharedFile.id,
+                chunk_number: i,
+                chunk_size: chunk.size,
+                storage_path: chunkPath,
+                upload_status: 'completed'
+              });
+
+            if (chunkError) {
+              throw new Error(`Database record failed: ${chunkError.message}`);
+            }
+
+            uploadSuccess = true;
+            
+            // Update progress
+            const completedChunks = i + 1;
+            const percentage = Math.round((completedChunks / totalChunks) * 100);
+            
+            updateProgress({ 
+              completedChunks, 
+              percentage,
+              currentProcess: `Chunk ${i + 1}/${totalChunks} uploaded successfully`
+            });
+
+          } catch (error: any) {
+            retries--;
+            console.error(`Chunk ${i} upload attempt failed:`, error);
+            
+            if (retries > 0) {
+              updateProgress({ 
+                currentProcess: `Retrying chunk ${i + 1}/${totalChunks} (${retries} attempts left)...` 
+              });
+              await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+            } else {
+              throw new Error(`Failed to upload chunk ${i + 1} after 3 attempts: ${error.message}`);
+            }
+          }
+        }
       }
 
+      updateProgress({ currentProcess: 'Finalizing upload...' });
+
       // Mark file as completed
-      await supabase
+      const { error: updateError } = await supabase
         .from('shared_files')
         .update({ upload_status: 'completed' })
         .eq('id', sharedFile.id);
 
+      if (updateError) {
+        throw new Error(`Failed to finalize upload: ${updateError.message}`);
+      }
+
       // Update final status
-      setUploads(prev => prev.map(upload => 
-        upload.fileName === file.name 
-          ? { ...upload, status: 'completed', shareToken: sharedFile.share_token }
-          : upload
-      ));
+      updateProgress({ 
+        status: 'completed', 
+        shareToken: sharedFile.share_token,
+        currentProcess: `Upload completed! File ready for sharing.`
+      });
 
       toast.success(`${file.name} uploaded successfully!`);
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Upload error:', error);
-      setUploads(prev => prev.map(upload => 
-        upload.fileName === file.name 
-          ? { ...upload, status: 'failed' }
-          : upload
-      ));
-      toast.error(`Failed to upload ${file.name}`);
+      const errorMessage = error.message || 'Unknown error occurred';
+      
+      updateProgress({ 
+        status: 'failed',
+        error: errorMessage,
+        currentProcess: `Upload failed: ${errorMessage}`
+      });
+      
+      toast.error(`Failed to upload ${file.name}: ${errorMessage}`);
     }
   };
 
@@ -198,7 +260,7 @@ export const FileUpload = () => {
           <CardContent>
             <div className="space-y-4">
               {uploads.map((upload, index) => (
-                <div key={index} className="space-y-2">
+                <div key={index} className="space-y-3 p-4 border rounded-lg">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <File className="h-4 w-4" />
@@ -215,7 +277,18 @@ export const FileUpload = () => {
                     </span>
                   </div>
                   
-                  <Progress value={upload.percentage} className="w-full" />
+                  <div className="space-y-2">
+                    <Progress value={upload.percentage} className="w-full" />
+                    <div className="text-xs text-muted-foreground bg-muted/50 p-2 rounded">
+                      Status: {upload.currentProcess}
+                    </div>
+                  </div>
+                  
+                  {upload.error && (
+                    <div className="text-xs text-red-600 bg-red-50 p-2 rounded border border-red-200">
+                      Error: {upload.error}
+                    </div>
+                  )}
                   
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-muted-foreground">
