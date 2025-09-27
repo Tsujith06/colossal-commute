@@ -3,8 +3,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Download, File, CheckCircle, AlertCircle, Clock } from "lucide-react";
+import { Download, File, CheckCircle, AlertCircle, Clock, HardDrive } from "lucide-react";
 import { toast } from "sonner";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { offlineStorage, type OfflineFile } from "@/lib/offlineStorage";
 
 interface FileInfo {
   id: string;
@@ -31,9 +33,12 @@ export const FileDownload = ({ shareToken }: FileDownloadProps) => {
   const [fileInfo, setFileInfo] = useState<FileInfo | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
   const [loading, setLoading] = useState(true);
+  const [offlineFile, setOfflineFile] = useState<OfflineFile | null>(null);
+  const isOnline = useOnlineStatus();
 
   useEffect(() => {
     fetchFileInfo();
+    checkOfflineCache();
   }, [shareToken]);
 
   const fetchFileInfo = async () => {
@@ -54,6 +59,16 @@ export const FileDownload = ({ shareToken }: FileDownloadProps) => {
       toast.error('File not found, expired, or invalid share link');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const checkOfflineCache = async () => {
+    try {
+      // Check if file is cached offline using share token as ID
+      const cachedFile = await offlineStorage.getOfflineFile(`share_${shareToken}`);
+      setOfflineFile(cachedFile);
+    } catch (error) {
+      console.error('Error checking offline cache:', error);
     }
   };
 
@@ -95,10 +110,35 @@ export const FileDownload = ({ shareToken }: FileDownloadProps) => {
     return downloadedChunks;
   };
 
-  const assembleFile = (chunks: Blob[], filename: string): void => {
+  const assembleFile = async (chunks: Blob[], filename: string): Promise<void> => {
     setDownloadProgress(prev => prev ? { ...prev, status: 'assembling' } : null);
     
     const assembledFile = new Blob(chunks);
+    
+    // Save to offline cache
+    if (fileInfo) {
+      try {
+        const offlineCacheFile: OfflineFile = {
+          id: `share_${shareToken}`,
+          filename: filename,
+          file: assembledFile,
+          downloadedAt: new Date(),
+          shareToken: shareToken,
+          size: assembledFile.size
+        };
+        
+        await offlineStorage.saveOfflineFile(offlineCacheFile);
+        setOfflineFile(offlineCacheFile);
+        
+        toast.success('File cached for offline access!', {
+          description: 'You can now access this file even when offline'
+        });
+      } catch (error) {
+        console.error('Failed to cache file offline:', error);
+        // Don't fail the download if caching fails
+      }
+    }
+    
     const url = URL.createObjectURL(assembledFile);
     
     // Create download link
@@ -128,11 +168,31 @@ export const FileDownload = ({ shareToken }: FileDownloadProps) => {
 
     try {
       const chunks = await downloadChunks();
-      assembleFile(chunks, fileInfo.filename);
+      await assembleFile(chunks, fileInfo.filename);
     } catch (error) {
       console.error('Download error:', error);
       setDownloadProgress(prev => prev ? { ...prev, status: 'failed' } : null);
       toast.error('Failed to download file');
+    }
+  };
+
+  const downloadOfflineFile = () => {
+    if (!offlineFile) return;
+    
+    try {
+      const url = URL.createObjectURL(offlineFile.file);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = offlineFile.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      toast.success('Downloaded from offline cache!');
+    } catch (error) {
+      console.error('Failed to download offline file:', error);
+      toast.error('Failed to download offline file');
     }
   };
 
@@ -222,14 +282,45 @@ export const FileDownload = ({ shareToken }: FileDownloadProps) => {
               </div>
             )}
 
-            <Button
-              onClick={startDownload}
-              disabled={fileInfo.upload_status !== 'completed' || isExpired() || downloadProgress?.status === 'downloading'}
-              className="w-full"
-            >
-              <Download className="h-4 w-4 mr-2" />
-              {downloadProgress?.status === 'downloading' ? 'Downloading...' : 'Download File'}
-            </Button>
+            {/* Offline status indicators */}
+            {!isOnline && (
+              <div className="flex items-center gap-2 text-orange-600 bg-orange-50 p-3 rounded-lg">
+                <AlertCircle className="h-4 w-4" />
+                <span>You are currently offline. {offlineFile ? 'You can download this file from cache.' : 'This file is not cached for offline access.'}</span>
+              </div>
+            )}
+            
+            {offlineFile && (
+              <div className="flex items-center gap-2 text-green-600 bg-green-50 p-3 rounded-lg">
+                <HardDrive className="h-4 w-4" />
+                <span>This file is cached for offline access (Downloaded {formatDate(offlineFile.downloadedAt.toISOString())})</span>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              {/* Online download button */}
+              <Button
+                onClick={startDownload}
+                disabled={!isOnline || fileInfo.upload_status !== 'completed' || isExpired() || downloadProgress?.status === 'downloading'}
+                className="flex-1"
+                variant={offlineFile && !isOnline ? "outline" : "default"}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                {downloadProgress?.status === 'downloading' ? 'Downloading...' : 'Download File'}
+              </Button>
+
+              {/* Offline download button */}
+              {offlineFile && (
+                <Button
+                  onClick={downloadOfflineFile}
+                  variant="outline"
+                  className="flex items-center gap-2"
+                >
+                  <HardDrive className="h-4 w-4" />
+                  Offline Cache
+                </Button>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>

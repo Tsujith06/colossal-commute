@@ -3,8 +3,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Upload, File, Share2, CheckCircle, AlertCircle } from "lucide-react";
+import { Upload, File, Share2, CheckCircle, AlertCircle, WifiOff } from "lucide-react";
 import { toast } from "sonner";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { offlineStorage, type QueuedUpload } from "@/lib/offlineStorage";
 
 const CHUNK_SIZE = 50 * 1024 * 1024; // 50MB in bytes for better reliability
 
@@ -22,6 +24,7 @@ interface UploadProgress {
 export const FileUpload = () => {
   const [uploads, setUploads] = useState<UploadProgress[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isOnline = useOnlineStatus();
 
   const splitFileIntoChunks = (file: File): Blob[] => {
     const chunks: Blob[] = [];
@@ -189,17 +192,43 @@ export const FileUpload = () => {
     }
   };
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files) return;
 
-    Array.from(files).forEach(file => {
-      uploadFile(file);
-    });
+    for (const file of Array.from(files)) {
+      if (!isOnline) {
+        // Queue file for upload when back online
+        await queueFileForUpload(file);
+      } else {
+        // Upload immediately
+        uploadFile(file);
+      }
+    }
     
     // Reset input
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+  };
+
+  const queueFileForUpload = async (file: File) => {
+    try {
+      const queuedUpload: QueuedUpload = {
+        id: `queue_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        filename: file.name,
+        file: file,
+        queuedAt: new Date(),
+        size: file.size
+      };
+      
+      await offlineStorage.queueUpload(queuedUpload);
+      toast.success(`${file.name} queued for upload when online`, {
+        description: "File will be uploaded automatically when connection is restored"
+      });
+    } catch (error) {
+      console.error('Failed to queue file:', error);
+      toast.error(`Failed to queue ${file.name} for upload`);
     }
   };
 
@@ -216,9 +245,18 @@ export const FileUpload = () => {
           <CardTitle className="flex items-center gap-2">
             <Upload className="h-5 w-5" />
             Upload Large Files
+            {!isOnline && (
+              <div className="flex items-center gap-1 ml-auto">
+                <WifiOff className="h-4 w-4 text-orange-500" />
+                <span className="text-sm text-orange-600">Offline Mode</span>
+              </div>
+            )}
           </CardTitle>
           <CardDescription>
-            Upload files of any size - they'll be automatically split into chunks for transfer
+            {isOnline 
+              ? "Upload files of any size - they'll be automatically split into chunks for transfer"
+              : "Files will be queued for upload when connection is restored"
+            }
           </CardDescription>
         </CardHeader>
         <CardContent>
