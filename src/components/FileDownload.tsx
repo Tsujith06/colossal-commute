@@ -43,6 +43,29 @@ export const FileDownload = ({ shareToken }: FileDownloadProps) => {
 
   const fetchFileInfo = async () => {
     try {
+      // Check if it's an offline file first
+      if (shareToken.startsWith('offline_')) {
+        const cachedFile = await offlineStorage.getOfflineFile(shareToken);
+        if (cachedFile) {
+          // Create a mock FileInfo object for offline files
+          setFileInfo({
+            id: shareToken,
+            filename: cachedFile.filename,
+            file_size: cachedFile.size,
+            total_chunks: 1,
+            upload_status: 'completed',
+            created_at: cachedFile.downloadedAt.toISOString(),
+            expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() // 7 days from now
+          });
+          setOfflineFile(cachedFile);
+          setLoading(false);
+          return;
+        } else {
+          throw new Error('Offline file not found or expired');
+        }
+      }
+
+      // For online files, fetch from server
       const { data, error } = await supabase
         .rpc('get_shared_file_info', { token: shareToken });
 
@@ -64,7 +87,14 @@ export const FileDownload = ({ shareToken }: FileDownloadProps) => {
 
   const checkOfflineCache = async () => {
     try {
-      // Check if file is cached offline using share token as ID
+      // For offline files, check using the share token directly
+      if (shareToken.startsWith('offline_')) {
+        const cachedFile = await offlineStorage.getOfflineFile(shareToken);
+        setOfflineFile(cachedFile);
+        return;
+      }
+      
+      // For online files, check if file is cached offline using share token as ID
       const cachedFile = await offlineStorage.getOfflineFile(`share_${shareToken}`);
       setOfflineFile(cachedFile);
     } catch (error) {
@@ -253,11 +283,16 @@ export const FileDownload = ({ shareToken }: FileDownloadProps) => {
           <CardTitle className="flex items-center gap-2">
             <File className="h-5 w-5" />
             {fileInfo.filename}
+            {shareToken.startsWith('offline_') && (
+              <div className="flex items-center gap-1 ml-auto">
+                <HardDrive className="h-4 w-4 text-blue-500" />
+                <span className="text-sm text-blue-600">Offline File</span>
+              </div>
+            )}
           </CardTitle>
           <CardDescription>
             Size: {formatFileSize(fileInfo.file_size)} • 
-            Chunks: {fileInfo.total_chunks} • 
-            Uploaded: {formatDate(fileInfo.created_at)}
+            {shareToken.startsWith('offline_') ? 'Stored locally' : `Chunks: ${fileInfo.total_chunks} • Uploaded: ${formatDate(fileInfo.created_at)}`}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -283,14 +318,21 @@ export const FileDownload = ({ shareToken }: FileDownloadProps) => {
             )}
 
             {/* Offline status indicators */}
-            {!isOnline && (
+            {!isOnline && !shareToken.startsWith('offline_') && (
               <div className="flex items-center gap-2 text-orange-600 bg-orange-50 p-3 rounded-lg">
                 <AlertCircle className="h-4 w-4" />
                 <span>You are currently offline. {offlineFile ? 'You can download this file from cache.' : 'This file is not cached for offline access.'}</span>
               </div>
             )}
             
-            {offlineFile && (
+            {shareToken.startsWith('offline_') && (
+              <div className="flex items-center gap-2 text-blue-600 bg-blue-50 p-3 rounded-lg">
+                <HardDrive className="h-4 w-4" />
+                <span>This file was uploaded offline and is stored locally on this device</span>
+              </div>
+            )}
+            
+            {offlineFile && !shareToken.startsWith('offline_') && (
               <div className="flex items-center gap-2 text-green-600 bg-green-50 p-3 rounded-lg">
                 <HardDrive className="h-4 w-4" />
                 <span>This file is cached for offline access (Downloaded {formatDate(offlineFile.downloadedAt.toISOString())})</span>
@@ -298,19 +340,30 @@ export const FileDownload = ({ shareToken }: FileDownloadProps) => {
             )}
 
             <div className="flex gap-2">
-              {/* Online download button */}
-              <Button
-                onClick={startDownload}
-                disabled={!isOnline || fileInfo.upload_status !== 'completed' || isExpired() || downloadProgress?.status === 'downloading'}
-                className="flex-1"
-                variant={offlineFile && !isOnline ? "outline" : "default"}
-              >
-                <Download className="h-4 w-4 mr-2" />
-                {downloadProgress?.status === 'downloading' ? 'Downloading...' : 'Download File'}
-              </Button>
+              {/* Online download button or offline file download */}
+              {shareToken.startsWith('offline_') ? (
+                <Button
+                  onClick={downloadOfflineFile}
+                  disabled={!offlineFile}
+                  className="flex-1"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Download File
+                </Button>
+              ) : (
+                <Button
+                  onClick={startDownload}
+                  disabled={!isOnline || fileInfo.upload_status !== 'completed' || isExpired() || downloadProgress?.status === 'downloading'}
+                  className="flex-1"
+                  variant={offlineFile && !isOnline ? "outline" : "default"}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  {downloadProgress?.status === 'downloading' ? 'Downloading...' : 'Download File'}
+                </Button>
+              )}
 
-              {/* Offline download button */}
-              {offlineFile && (
+              {/* Offline cache download button for online files */}
+              {offlineFile && !shareToken.startsWith('offline_') && (
                 <Button
                   onClick={downloadOfflineFile}
                   variant="outline"

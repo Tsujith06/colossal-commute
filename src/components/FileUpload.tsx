@@ -198,8 +198,8 @@ export const FileUpload = () => {
 
     for (const file of Array.from(files)) {
       if (!isOnline) {
-        // Queue file for upload when back online
-        await queueFileForUpload(file);
+        // Store file locally for immediate offline access
+        await storeFileOffline(file);
       } else {
         // Upload immediately
         uploadFile(file);
@@ -212,8 +212,24 @@ export const FileUpload = () => {
     }
   };
 
-  const queueFileForUpload = async (file: File) => {
+  const storeFileOffline = async (file: File) => {
     try {
+      // Generate a unique share token for offline file
+      const shareToken = `offline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      const offlineFile = {
+        id: shareToken,
+        filename: file.name,
+        file: file,
+        downloadedAt: new Date(),
+        shareToken: shareToken,
+        size: file.size
+      };
+      
+      // Store file locally
+      await offlineStorage.saveOfflineFile(offlineFile);
+      
+      // Also queue for server upload when online
       const queuedUpload: QueuedUpload = {
         id: `queue_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         filename: file.name,
@@ -223,12 +239,30 @@ export const FileUpload = () => {
       };
       
       await offlineStorage.queueUpload(queuedUpload);
-      toast.success(`${file.name} queued for upload when online`, {
-        description: "File will be uploaded automatically when connection is restored"
+      
+      // Show success with share token
+      const shareUrl = `${window.location.origin}/download/${shareToken}`;
+      
+      toast.success(`${file.name} uploaded offline!`, {
+        description: `File is available locally. Share link: ${shareUrl}`
       });
+      
+      // Add to uploads display
+      const uploadProgress: UploadProgress = {
+        fileName: file.name,
+        totalChunks: 1,
+        completedChunks: 1,
+        percentage: 100,
+        status: 'completed',
+        shareToken: shareToken,
+        currentProcess: `Stored offline - available locally`
+      };
+      
+      setUploads(prev => [...prev, uploadProgress]);
+      
     } catch (error) {
-      console.error('Failed to queue file:', error);
-      toast.error(`Failed to queue ${file.name} for upload`);
+      console.error('Failed to store file offline:', error);
+      toast.error(`Failed to store ${file.name} offline`);
     }
   };
 
