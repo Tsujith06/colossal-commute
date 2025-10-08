@@ -1,5 +1,6 @@
 import { FileUpload } from "@/components/FileUpload";
 import { OfflineManager } from "@/components/OfflineManager";
+import { P2PFileSharing } from "@/components/P2PFileSharing";
 
 const Index = () => {
   const handleUploadFile = (file: File) => {
@@ -30,6 +31,11 @@ const Index = () => {
         </div>
         
         <FileUpload />
+        
+        <div>
+          <h2 className="text-2xl font-bold mb-6">Local WiFi File Sharing (Offline P2P)</h2>
+          <P2PFileSharing />
+        </div>
         
         <div>
           <h2 className="text-2xl font-bold mb-6">Offline File Management</h2>
