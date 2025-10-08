@@ -56,6 +56,9 @@ export class P2PFileTransfer {
     peer.dataChannel = dataChannel;
     this.setupDataChannel(dataChannel, peer);
 
+    // Store the peer before creating offer
+    this.peers.set(peer.id, peer);
+
     const offer = await connection.createOffer();
     await connection.setLocalDescription(offer);
 
@@ -83,7 +86,8 @@ export class P2PFileTransfer {
   }
 
   async acceptOffer(offerCode: string): Promise<string> {
-    const offerData = JSON.parse(atob(offerCode));
+    try {
+      const offerData = JSON.parse(atob(offerCode));
     
     const peer: P2PPeer = {
       id: offerData.peerId,
@@ -118,30 +122,52 @@ export class P2PFileTransfer {
       }
     });
 
-    this.peers.set(peer.id, peer);
+      this.peers.set(peer.id, peer);
 
-    const answerData = {
-      type: 'answer',
-      sdp: connection.localDescription,
-      peerId: this.localPeerId,
-      peerName: this.localPeerName
-    };
+      const answerData = {
+        type: 'answer',
+        sdp: connection.localDescription,
+        peerId: this.localPeerId,
+        peerName: this.localPeerName
+      };
 
-    return btoa(JSON.stringify(answerData));
+      console.log('Accepted offer from peer:', peer.name);
+      return btoa(JSON.stringify(answerData));
+    } catch (error) {
+      console.error('Failed to accept offer:', error);
+      throw error;
+    }
   }
 
   async completeConnection(answerCode: string) {
-    const answerData = JSON.parse(atob(answerCode));
-    
-    const peer = Array.from(this.peers.values()).find(p => p.id === this.localPeerId);
-    if (peer?.connection) {
+    try {
+      const answerData = JSON.parse(atob(answerCode));
+      
+      const peer = this.peers.get(this.localPeerId);
+      if (!peer) {
+        throw new Error('No pending connection found. Create an offer first.');
+      }
+      
+      if (!peer.connection) {
+        throw new Error('Connection not initialized');
+      }
+
       await peer.connection.setRemoteDescription(answerData.sdp);
       
       // Update peer info
-      peer.id = answerData.peerId;
-      peer.name = answerData.peerName;
+      const remotePeerId = answerData.peerId;
+      const remotePeerName = answerData.peerName;
+      
+      peer.id = remotePeerId;
+      peer.name = remotePeerName;
+      
       this.peers.delete(this.localPeerId);
-      this.peers.set(peer.id, peer);
+      this.peers.set(remotePeerId, peer);
+      
+      console.log('Connection completed with peer:', remotePeerName);
+    } catch (error) {
+      console.error('Failed to complete connection:', error);
+      throw error;
     }
   }
 

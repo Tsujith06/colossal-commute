@@ -133,9 +133,10 @@ export const P2PFileSharing = () => {
         description: "P2P connection established",
       });
     } catch (error) {
+      console.error('Connection error:', error);
       toast({
-        title: "Error",
-        description: "Failed to complete connection",
+        title: "Connection Failed",
+        description: error instanceof Error ? error.message : "Failed to complete connection",
         variant: "destructive"
       });
     }
