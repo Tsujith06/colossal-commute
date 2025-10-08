@@ -43,12 +43,25 @@ export class P2PFileTransfer {
       id: this.localPeerId,
       name: this.localPeerName,
       connection: new RTCPeerConnection({
-        iceServers: [] // No STUN/TURN servers - local network only
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
       }),
       dataChannel: null
     };
 
     const connection = peer.connection!;
+    
+    // Add connection state monitoring
+    connection.oniceconnectionstatechange = () => {
+      console.log('ICE Connection State:', connection.iceConnectionState);
+    };
+    
+    connection.onconnectionstatechange = () => {
+      console.log('Connection State:', connection.connectionState);
+    };
+
     const dataChannel = connection.createDataChannel('fileTransfer', {
       ordered: true
     });
@@ -61,6 +74,8 @@ export class P2PFileTransfer {
 
     const offer = await connection.createOffer();
     await connection.setLocalDescription(offer);
+    
+    console.log('Offer created, waiting for ICE candidates...');
 
     // Wait for ICE gathering to complete
     await new Promise<void>((resolve) => {
@@ -93,19 +108,33 @@ export class P2PFileTransfer {
       id: offerData.peerId,
       name: offerData.peerName,
       connection: new RTCPeerConnection({
-        iceServers: []
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
       }),
       dataChannel: null
     };
 
     const connection = peer.connection!;
 
+    // Add connection state monitoring
+    connection.oniceconnectionstatechange = () => {
+      console.log('ICE Connection State (accepter):', connection.iceConnectionState);
+    };
+    
+    connection.onconnectionstatechange = () => {
+      console.log('Connection State (accepter):', connection.connectionState);
+    };
+
     connection.ondatachannel = (event) => {
+      console.log('Data channel received');
       peer.dataChannel = event.channel;
       this.setupDataChannel(event.channel, peer);
     };
 
     await connection.setRemoteDescription(offerData.sdp);
+    console.log('Remote description set');
     const answer = await connection.createAnswer();
     await connection.setLocalDescription(answer);
 
