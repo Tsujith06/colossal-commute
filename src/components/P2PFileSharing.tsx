@@ -12,14 +12,13 @@ import { QRCodeSVG } from "qrcode.react";
 export const P2PFileSharing = () => {
   const [peerName, setPeerName] = useState("");
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isSender, setIsSender] = useState(false);
   const [connectionCode, setConnectionCode] = useState("");
-  const [inputConnectionCode, setInputConnectionCode] = useState("");
-  const [inputAnswerCode, setInputAnswerCode] = useState("");
-  const [answerCode, setAnswerCode] = useState("");
+  const [inputCode, setInputCode] = useState("");
   const [connectedPeers, setConnectedPeers] = useState<P2PPeer[]>([]);
   const [transferProgress, setTransferProgress] = useState<FileTransferProgress | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [codeCopied, setCodeCopied] = useState<string>("");
+  const [pendingAnswer, setPendingAnswer] = useState("");
   const p2pRef = useRef<P2PFileTransfer | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -84,56 +83,70 @@ export const P2PFileSharing = () => {
     });
   };
 
-  const createConnection = async () => {
-    if (!p2pRef.current) return;
+  const startSharing = async () => {
+    if (!p2pRef.current || selectedFiles.length === 0) {
+      toast({
+        title: "No Files Selected",
+        description: "Please select files to share",
+        variant: "destructive"
+      });
+      return;
+    }
 
     try {
       const code = await p2pRef.current.createOffer();
       setConnectionCode(code);
+      setIsSender(true);
       toast({
-        title: "Connection Code Created",
-        description: "Share this code with the other device",
+        title: "Ready to Share",
+        description: "Show QR code or share code with receiver",
       });
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to create connection code",
+        description: "Failed to start sharing",
         variant: "destructive"
       });
     }
   };
 
-  const acceptConnection = async () => {
-    if (!p2pRef.current || !inputConnectionCode.trim()) return;
+  const connectAndReceive = async () => {
+    if (!p2pRef.current || !inputCode.trim()) {
+      toast({
+        title: "No Code Entered",
+        description: "Please enter the connection code",
+        variant: "destructive"
+      });
+      return;
+    }
 
     try {
-      const answer = await p2pRef.current.acceptOffer(inputConnectionCode);
-      setAnswerCode(answer);
+      const answer = await p2pRef.current.acceptOffer(inputCode);
+      setPendingAnswer(answer);
       toast({
-        title: "Connection Accepted",
-        description: "Share the answer code back",
+        title: "Connecting...",
+        description: "Show your QR code to the sender",
       });
     } catch (error) {
       toast({
-        title: "Error",
-        description: "Failed to accept connection",
+        title: "Connection Failed",
+        description: error instanceof Error ? error.message : "Failed to connect",
         variant: "destructive"
       });
     }
   };
 
-  const completeConnection = async () => {
-    if (!p2pRef.current || !inputAnswerCode.trim()) return;
+  const completeAsReceiver = async () => {
+    if (!p2pRef.current || !inputCode.trim()) return;
 
     try {
-      await p2pRef.current.completeConnection(inputAnswerCode);
+      await p2pRef.current.completeConnection(inputCode);
       setConnectionCode("");
-      setInputConnectionCode("");
-      setInputAnswerCode("");
-      setAnswerCode("");
+      setInputCode("");
+      setPendingAnswer("");
       toast({
-        title: "Connected",
-        description: "P2P connection established",
+        title: "Connected!",
+        description: "Ready to receive files",
       });
     } catch (error) {
       console.error('Connection error:', error);
@@ -178,13 +191,11 @@ export const P2PFileSharing = () => {
     }
   };
 
-  const copyToClipboard = (text: string, label: string) => {
+  const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
-    setCodeCopied(text);
-    setTimeout(() => setCodeCopied(""), 2000);
     toast({
       title: "Copied",
-      description: `${label} copied to clipboard`,
+      description: "Code copied to clipboard",
     });
   };
 
@@ -247,186 +258,42 @@ export const P2PFileSharing = () => {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <Tabs defaultValue="connect">
+        <Tabs defaultValue="send" className="space-y-4">
           <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="connect">
-              <Wifi className="mr-2 h-4 w-4" />
-              Connect
-            </TabsTrigger>
-            <TabsTrigger value="share" disabled={connectedPeers.length === 0}>
+            <TabsTrigger value="send">
               <Send className="mr-2 h-4 w-4" />
               Send Files
             </TabsTrigger>
+            <TabsTrigger value="receive">
+              <Wifi className="mr-2 h-4 w-4" />
+              Receive Files
+            </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="connect" className="space-y-6">
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
-                  <QrCode className="h-4 w-4 text-primary" />
-                </div>
-                <div>
-                  <h3 className="font-semibold">Send Connection</h3>
-                  <p className="text-sm text-muted-foreground">Let others connect to you</p>
-                </div>
-              </div>
-              
-              <Button onClick={createConnection} className="w-full" size="lg">
-                Generate QR Code
-              </Button>
-              
-              {connectionCode && (
-                <div className="space-y-4 p-4 bg-muted rounded-lg">
-                  <div className="flex justify-center">
-                    <div className="bg-white p-4 rounded-lg">
-                      <QRCodeSVG value={connectionCode} size={200} />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-sm font-medium">Or share code manually:</label>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => copyToClipboard(connectionCode, "Connection code")}
-                      >
-                        {codeCopied === connectionCode ? (
-                          <Check className="h-4 w-4" />
-                        ) : (
-                          <Copy className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </div>
-                    <code className="block p-2 bg-background rounded text-xs break-all">
-                      {connectionCode}
-                    </code>
-                  </div>
-                </div>
-              )}
-
-              {answerCode && (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Paste answer code to complete:</label>
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Paste answer code"
-                      value={inputAnswerCode}
-                      onChange={(e) => setInputAnswerCode(e.target.value)}
-                    />
-                    <Button onClick={completeConnection}>
-                      Connect
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-background px-2 text-muted-foreground">Or</span>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
-                  <Smartphone className="h-4 w-4 text-primary" />
-                </div>
-                <div>
-                  <h3 className="font-semibold">Receive Connection</h3>
-                  <p className="text-sm text-muted-foreground">Connect to another device</p>
-                </div>
-              </div>
-              
-              <div className="space-y-2">
-                <Input
-                  placeholder="Paste connection code or scan QR"
-                  value={inputConnectionCode}
-                  onChange={(e) => setInputConnectionCode(e.target.value)}
-                />
-                <Button onClick={acceptConnection} className="w-full" size="lg">
-                  Connect to Device
-                </Button>
-              </div>
-
-              {answerCode && !connectionCode && (
-                <div className="space-y-4 p-4 bg-muted rounded-lg">
-                  <div className="flex justify-center">
-                    <div className="bg-white p-4 rounded-lg">
-                      <QRCodeSVG value={answerCode} size={200} />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-sm font-medium">Send this answer code back:</label>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => copyToClipboard(answerCode, "Answer code")}
-                      >
-                        {codeCopied === answerCode ? (
-                          <Check className="h-4 w-4" />
-                        ) : (
-                          <Copy className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </div>
-                    <code className="block p-2 bg-background rounded text-xs break-all">
-                      {answerCode}
-                    </code>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {connectedPeers.length > 0 && (
-              <div className="border-t pt-4">
-                <h3 className="font-semibold mb-3">Connected Devices</h3>
-                <div className="space-y-2">
-                  {connectedPeers.map(peer => (
-                    <div key={peer.id} className="p-3 bg-primary/5 rounded-lg flex items-center gap-3 border border-primary/20">
-                      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                        <Users className="h-5 w-5 text-primary" />
-                      </div>
-                      <div className="flex-1">
-                        <p className="font-medium">{peer.name}</p>
-                        <p className="text-xs text-muted-foreground">Connected</p>
-                      </div>
-                      <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </TabsContent>
-
-          <TabsContent value="share" className="space-y-4">
-            <div className="space-y-4">
-              <div className="space-y-3">
-                <h3 className="font-semibold">Select Files</h3>
+          <TabsContent value="send" className="space-y-4 pt-4">
+            {!isSender ? (
+              <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-2">
                   <Button
                     variant="outline"
                     onClick={() => fileInputRef.current?.click()}
                     size="lg"
-                    className="h-20 flex-col gap-2"
+                    className="h-24 flex-col gap-2"
                   >
-                    <Send className="h-6 w-6" />
-                    <span className="text-sm">Files</span>
+                    <Send className="h-8 w-8" />
+                    <span>Select Files</span>
                   </Button>
                   <Button
                     variant="outline"
                     onClick={() => folderInputRef.current?.click()}
                     size="lg"
-                    className="h-20 flex-col gap-2"
+                    className="h-24 flex-col gap-2"
                   >
-                    <FolderOpen className="h-6 w-6" />
-                    <span className="text-sm">Folder</span>
+                    <FolderOpen className="h-8 w-8" />
+                    <span>Select Folder</span>
                   </Button>
                 </div>
+                
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -441,67 +308,223 @@ export const P2PFileSharing = () => {
                   onChange={handleFolderSelect}
                   className="hidden"
                 />
-              </div>
 
-              {selectedFiles.length > 0 && (
-                <div className="border rounded-lg p-4 bg-muted/50">
-                  <h4 className="font-medium mb-3">
-                    {selectedFiles.length} file{selectedFiles.length > 1 ? 's' : ''} selected
-                  </h4>
-                  <div className="space-y-1 max-h-40 overflow-auto">
-                    {selectedFiles.map((file, idx) => (
-                      <div key={idx} className="text-sm text-muted-foreground flex items-center gap-2 p-2 bg-background rounded">
-                        <Send className="h-3 w-3" />
-                        {file.name}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {connectedPeers.length > 0 && selectedFiles.length > 0 && (
-                <div className="space-y-3">
-                  <h4 className="font-medium">Send To:</h4>
-                  <div className="space-y-2">
-                    {connectedPeers.map(peer => (
-                      <Button
-                        key={peer.id}
-                        onClick={() => sendFiles(peer.id)}
-                        className="w-full justify-start h-auto p-4"
-                        size="lg"
-                      >
-                        <div className="flex items-center gap-3 w-full">
-                          <div className="h-10 w-10 rounded-full bg-primary-foreground/10 flex items-center justify-center">
-                            <Users className="h-5 w-5" />
-                          </div>
-                          <div className="text-left flex-1">
-                            <p className="font-medium">{peer.name}</p>
-                            <p className="text-xs opacity-80">Tap to send</p>
-                          </div>
-                          <Send className="h-5 w-5" />
+                {selectedFiles.length > 0 && (
+                  <div className="border rounded-lg p-4 bg-muted/50">
+                    <h4 className="font-medium mb-3">
+                      {selectedFiles.length} file{selectedFiles.length > 1 ? 's' : ''} selected
+                    </h4>
+                    <div className="space-y-1 max-h-32 overflow-auto">
+                      {selectedFiles.slice(0, 5).map((file, idx) => (
+                        <div key={idx} className="text-sm text-muted-foreground flex items-center gap-2 p-2 bg-background rounded">
+                          <Send className="h-3 w-3" />
+                          {file.name} ({(file.size / 1024 / 1024).toFixed(1)} MB)
                         </div>
-                      </Button>
-                    ))}
+                      ))}
+                      {selectedFiles.length > 5 && (
+                        <p className="text-sm text-muted-foreground p-2">
+                          +{selectedFiles.length - 5} more files
+                        </p>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {transferProgress && (
-                <div className="border rounded-lg p-4 bg-primary/5">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-                    <h4 className="font-medium">Sending: {transferProgress.filename}</h4>
-                  </div>
-                  <Progress 
-                    value={(transferProgress.progress / transferProgress.total) * 100} 
-                    className="mb-2"
-                  />
+                <Button 
+                  onClick={startSharing} 
+                  className="w-full" 
+                  size="lg"
+                  disabled={selectedFiles.length === 0}
+                >
+                  <QrCode className="mr-2 h-5 w-5" />
+                  Start Sharing
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 text-center">
+                  <p className="font-medium mb-1">Show this to receiver</p>
                   <p className="text-sm text-muted-foreground">
-                    {Math.round((transferProgress.progress / transferProgress.total) * 100)}% completed
+                    {selectedFiles.length} file{selectedFiles.length > 1 ? 's' : ''} ready to send
                   </p>
                 </div>
-              )}
-            </div>
+
+                <div className="flex justify-center">
+                  <div className="bg-white p-4 rounded-lg border-4 border-primary/10">
+                    <QRCodeSVG value={connectionCode} size={220} />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium">Or share this code:</label>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => copyToClipboard(connectionCode)}
+                    >
+                      <Copy className="h-4 w-4 mr-2" />
+                      Copy
+                    </Button>
+                  </div>
+                  <code className="block p-3 bg-muted rounded text-xs break-all font-mono">
+                    {connectionCode}
+                  </code>
+                </div>
+
+                {pendingAnswer && (
+                  <div className="space-y-2 p-4 bg-muted/50 rounded-lg border border-dashed">
+                    <label className="text-sm font-medium">Receiver's code (paste here to complete):</label>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Paste code from receiver"
+                        value={inputCode}
+                        onChange={(e) => setInputCode(e.target.value)}
+                        className="font-mono text-xs"
+                      />
+                      <Button onClick={completeAsReceiver}>
+                        Connect
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {connectedPeers.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+                      <p className="font-medium text-green-800">✓ Connected!</p>
+                    </div>
+                    <div className="space-y-2">
+                      {connectedPeers.map(peer => (
+                        <Button
+                          key={peer.id}
+                          onClick={() => sendFiles(peer.id)}
+                          className="w-full"
+                          size="lg"
+                        >
+                          <Send className="mr-2 h-5 w-5" />
+                          Send to {peer.name}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {transferProgress && (
+                  <div className="space-y-2 p-4 bg-muted rounded-lg">
+                    <div className="flex justify-between text-sm">
+                      <span className="font-medium">{transferProgress.filename}</span>
+                      <span>{Math.round((transferProgress.progress / transferProgress.total) * 100)}%</span>
+                    </div>
+                    <Progress value={(transferProgress.progress / transferProgress.total) * 100} />
+                  </div>
+                )}
+
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setIsSender(false);
+                    setConnectionCode("");
+                    setInputCode("");
+                    setPendingAnswer("");
+                  }}
+                  className="w-full"
+                >
+                  Cancel
+                </Button>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="receive" className="space-y-4 pt-4">
+            {!pendingAnswer ? (
+              <div className="space-y-4">
+                <div className="bg-primary/5 border border-primary/20 rounded-lg p-6 text-center space-y-2">
+                  <Wifi className="h-12 w-12 mx-auto text-primary" />
+                  <p className="font-medium">Ready to receive files</p>
+                  <p className="text-sm text-muted-foreground">
+                    Scan sender's QR or enter their code
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Connection Code</label>
+                  <Input
+                    placeholder="Paste sender's code here"
+                    value={inputCode}
+                    onChange={(e) => setInputCode(e.target.value)}
+                    className="font-mono"
+                  />
+                </div>
+
+                <Button 
+                  onClick={connectAndReceive} 
+                  className="w-full" 
+                  size="lg"
+                  disabled={!inputCode.trim()}
+                >
+                  <Wifi className="mr-2 h-5 w-5" />
+                  Connect & Receive
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
+                  <p className="font-medium text-blue-800">Show this to sender</p>
+                </div>
+
+                <div className="flex justify-center">
+                  <div className="bg-white p-4 rounded-lg border-4 border-blue-500/20">
+                    <QRCodeSVG value={pendingAnswer} size={220} />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium">Or share this code:</label>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => copyToClipboard(pendingAnswer)}
+                    >
+                      <Copy className="h-4 w-4 mr-2" />
+                      Copy
+                    </Button>
+                  </div>
+                  <code className="block p-3 bg-muted rounded text-xs break-all font-mono">
+                    {pendingAnswer}
+                  </code>
+                </div>
+
+                {connectedPeers.length > 0 && (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+                    <p className="font-medium text-green-800">✓ Connected to {connectedPeers[0].name}</p>
+                    <p className="text-sm text-green-700 mt-1">Waiting for files...</p>
+                  </div>
+                )}
+
+                {transferProgress && (
+                  <div className="space-y-2 p-4 bg-muted rounded-lg">
+                    <div className="flex justify-between text-sm">
+                      <span className="font-medium">Receiving: {transferProgress.filename}</span>
+                      <span>{Math.round((transferProgress.progress / transferProgress.total) * 100)}%</span>
+                    </div>
+                    <Progress value={(transferProgress.progress / transferProgress.total) * 100} />
+                  </div>
+                )}
+
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setInputCode("");
+                    setPendingAnswer("");
+                  }}
+                  className="w-full"
+                >
+                  Cancel
+                </Button>
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </CardContent>
