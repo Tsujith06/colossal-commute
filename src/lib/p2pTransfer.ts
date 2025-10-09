@@ -43,10 +43,7 @@ export class P2PFileTransfer {
       id: this.localPeerId,
       name: this.localPeerName,
       connection: new RTCPeerConnection({
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' }
-        ]
+        iceServers: [] // Local network only - no STUN servers for hotspot sharing
       }),
       dataChannel: null
     };
@@ -108,10 +105,7 @@ export class P2PFileTransfer {
       id: offerData.peerId,
       name: offerData.peerName,
       connection: new RTCPeerConnection({
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' }
-        ]
+        iceServers: [] // Local network only - no STUN servers for hotspot sharing
       }),
       dataChannel: null
     };
